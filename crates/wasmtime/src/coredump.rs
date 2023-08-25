@@ -34,7 +34,7 @@ pub struct WasmCoreDump {
 }
 
 impl WasmCoreDump {
-    pub(crate) fn new(store: &StoreOpaque, backtrace: WasmBacktrace) -> WasmCoreDump {
+    pub(crate) fn new(store: &mut StoreOpaque, backtrace: WasmBacktrace) -> WasmCoreDump {
         let modules: Vec<_> = store.modules().all_modules().cloned().collect();
         let instances: Vec<Instance> = store.all_instances().collect();
         let store_memories: Vec<Memory> = store.all_memories().collect();

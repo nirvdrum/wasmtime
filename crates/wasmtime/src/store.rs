@@ -96,9 +96,9 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use wasmtime_runtime::{
-    ExportGlobal, ExportMemory, InstanceAllocationRequest, InstanceAllocator, InstanceHandle,
-    ModuleInfo, OnDemandInstanceAllocator, SignalHandler, StoreBox, StorePtr, VMContext,
-    VMExternRef, VMExternRefActivationsTable, VMFuncRef, VMRuntimeLimits, WasmFault,
+    ExportGlobal, InstanceAllocationRequest, InstanceAllocator, InstanceHandle, ModuleInfo,
+    OnDemandInstanceAllocator, SignalHandler, StoreBox, StorePtr, VMContext, VMExternRef,
+    VMExternRefActivationsTable, VMFuncRef, VMRuntimeLimits, WasmFault,
 };
 
 mod context;
@@ -1263,22 +1263,61 @@ impl StoreOpaque {
         &mut self.instances[id.0].handle
     }
 
-    pub fn all_instances(&self) -> impl ExactSizeIterator<Item = Instance> {
-        self.store_data()
-            .iter::<InstanceData>()
-            .map(Instance::from_stored)
+    pub fn all_instances<'a>(&'a mut self) -> impl ExactSizeIterator<Item = Instance> + 'a {
+        let instances = self
+            .instances
+            .iter()
+            .enumerate()
+            .map(|(idx, _)| InstanceData::from_index(idx))
+            .collect::<Vec<_>>();
+        instances
+            .into_iter()
+            .map(|i| Instance::from_wasmtime(i, self))
     }
 
-    pub fn all_memories(&self) -> impl ExactSizeIterator<Item = Memory> {
-        self.store_data()
-            .iter::<ExportMemory>()
-            .map(Memory::from_stored)
+    pub fn all_memories<'a>(&'a mut self) -> impl Iterator<Item = Memory> + 'a {
+        unsafe {
+            let mems = self
+                .instances
+                .iter_mut()
+                .flat_map(|instance| instance.handle.defined_memories())
+                .collect::<Vec<_>>();
+            mems.into_iter()
+                .map(|memory| Memory::from_wasmtime_memory(memory, self))
+        }
     }
 
-    pub fn all_globals(&self) -> impl ExactSizeIterator<Item = Global> {
-        self.store_data()
-            .iter::<ExportGlobal>()
-            .map(Global::from_stored)
+    // TODO: have this (and the above methods) put these into a hashset and dedupe them
+    // (from_wasmtime_global inserts duplicates into the store, so dedupe here)
+    pub fn all_globals<'a>(&'a mut self) -> impl Iterator<Item = Global> + 'a {
+        unsafe {
+            // host globals first
+            let host_globals = self
+                .host_globals()
+                .iter()
+                .map(|global| ExportGlobal {
+                    definition: &mut (*global.get()).global as *mut _,
+                    global: (*global.get()).ty.to_wasm_type(),
+                })
+                .collect::<Vec<_>>();
+
+            let host_globals = host_globals
+                .into_iter()
+                .map(|g| Global::from_wasmtime_global(g, self))
+                .collect::<Vec<_>>();
+
+            // then go through all the instances and emit their globals
+            let globals = self
+                .instances
+                .iter_mut()
+                .flat_map(|instance| instance.handle.defined_globals())
+                .collect::<Vec<_>>();
+            host_globals.into_iter().chain(
+                globals
+                    .into_iter()
+                    .map(|(_, global)| Global::from_wasmtime_global(global, self)),
+            )
+        }
     }
 
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))] // not used on all platforms

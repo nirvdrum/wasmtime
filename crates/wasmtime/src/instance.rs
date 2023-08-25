@@ -42,6 +42,15 @@ pub(crate) struct InstanceData {
     exports: Vec<Option<Extern>>,
 }
 
+impl InstanceData {
+    pub fn from_index(idx: usize) -> InstanceData {
+        InstanceData {
+            id: InstanceId::from_index(idx),
+            exports: vec![],
+        }
+    }
+}
+
 impl Instance {
     /// Creates a new [`Instance`] from the previously compiled [`Module`] and
     /// list of `imports` specified.
